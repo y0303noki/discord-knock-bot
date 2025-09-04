@@ -8,7 +8,10 @@ const commands = [];
 
 // commands ディレクトリからコマンドファイルを読み込む
 const commandsPath = path.join(__dirname, '../commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+const commandFiles = fs
+  .readdirSync(commandsPath)
+  .filter(file => file.endsWith('.js'))
+  .filter(file => file === 'knock.js');
 
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
@@ -35,6 +38,14 @@ const rest = new REST({ version: '10' }).setToken(discord.token);
     );
 
     console.log(`Successfully reloaded ${data.length} application (/) commands.`);
+
+    // 古いグローバルコマンドをクリア（残っていると古い仕様が見えるため）
+    try {
+      await rest.put(Routes.applicationCommands(discord.clientId), { body: [] });
+      console.log('Cleared global application (/) commands.');
+    } catch (clearErr) {
+      console.warn('Warning: Failed to clear global commands (can be ignored if unused):', clearErr);
+    }
   } catch (error) {
     console.error('Error deploying commands:', error);
   }

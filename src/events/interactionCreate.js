@@ -70,13 +70,22 @@ async function handleSlashCommand(interaction) {
 }
 
 async function handleKnockCommand(interaction) {
-  const channel = interaction.options.getChannel('channel');
   const timeout = interaction.options.getInteger('timeout') || bot.defaultKnockTimeout;
+  const targetChannelId = bot.allowedVoiceChannelId;
+  const channel = targetChannelId ? await interaction.client.channels.fetch(targetChannelId).catch(() => null) : null;
 
   // ボイスチャンネルかチェック
   if (!channel || channel.type !== 2) { // GUILD_VOICE
     return await interaction.reply({
       content: 'ボイスチャンネルを指定してください。',
+      ephemeral: true
+    });
+  }
+
+  // 許可されたチャンネルのみ許容
+  if (bot.allowedVoiceChannelId && channel.id !== bot.allowedVoiceChannelId) {
+    return await interaction.reply({
+      content: 'このチャンネルでは /knock は使用できません。',
       ephemeral: true
     });
   }
