@@ -61,6 +61,10 @@ async function handleSlashCommand(interaction) {
       await handleDebugPermsCommand(interaction);
       break;
 
+    case 'help':
+      await handleHelpCommand(interaction);
+      break;
+
     default:
       await interaction.reply({
         content: '不明なコマンドです。',
@@ -86,6 +90,14 @@ async function handleKnockCommand(interaction) {
   if (bot.allowedVoiceChannelId && channel.id !== bot.allowedVoiceChannelId) {
     return await interaction.reply({
       content: 'このチャンネルでは /knock は使用できません。',
+      ephemeral: true
+    });
+  }
+
+  // コマンドを実行できるテキストチャンネルを制限
+  if (bot.allowedTextChannelId && interaction.channelId !== bot.allowedTextChannelId) {
+    return await interaction.reply({
+      content: 'このテキストチャンネルでは /knock は使用できません。',
       ephemeral: true
     });
   }
@@ -439,6 +451,23 @@ async function handleDebugPermsCommand(interaction) {
     console.error('debug_perms error:', e);
     await interaction.reply({ content: '権限の取得中にエラーが発生しました。', ephemeral: true });
   }
+}
+
+async function handleHelpCommand(interaction) {
+  const lines = [
+    'このBotは、指定のボイスチャンネルに「ノック」して入室許可を得る仕組みです。',
+    '',
+    '使い方:',
+    '- /knock を実行（チャンネル選択は不要です）',
+    '- 表示されたメッセージの「✅ 承認」を入室しているメンバーのだれかが押すと、入室できます',
+    '- 退室後一定時間経過すると、入室権限が自動で外れます',
+    '',
+    '補足:',
+    '- ボイスチャンネルが空なら/knockを実行すると承認なしで入室できます',
+    '- 権限は時間で自動的に外れます（承認からの待機時間／退室後の猶予）',
+  ];
+
+  await interaction.reply({ content: lines.join('\n'), ephemeral: true });
 }
 
 async function handleButtonInteraction(interaction) {

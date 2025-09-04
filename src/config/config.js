@@ -31,5 +31,6 @@ module.exports = {
     maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 5,
     revokeAfterExitMs: parseInt(process.env.REVOKE_AFTER_EXIT_MS) || 1800000, // 30分（退室後）
     allowedVoiceChannelId: process.env.ALLOWED_VOICE_CHANNEL_ID || null,
+    allowedTextChannelId: process.env.ALLOWED_TEXT_CHANNEL_ID || null,
   },
 };
