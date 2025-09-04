@@ -57,6 +57,62 @@ class DatabaseManager {
     });
   }
 
+  // 一時権限の作成（付与を記録）
+  createPermissionGrant(channelId, userId, permissionType, durationMs) {
+    return new Promise((resolve, reject) => {
+      const expiresAt = durationMs && durationMs > 0 ? new Date(Date.now() + durationMs).toISOString() : null;
+      const query = `
+        INSERT INTO channel_permissions (channel_id, user_id, permission_type, expires_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(channel_id, user_id, permission_type) DO UPDATE SET expires_at = excluded.expires_at
+      `;
+
+      this.db.run(query, [channelId, userId, permissionType, expiresAt], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+  }
+
+  // 一時権限の取得
+  getPermissionGrant(channelId, userId, permissionType) {
+    return new Promise((resolve, reject) => {
+      const query = `
+        SELECT * FROM channel_permissions
+        WHERE channel_id = ? AND user_id = ? AND permission_type = ?
+      `;
+
+      this.db.get(query, [channelId, userId, permissionType], (err, row) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(row);
+        }
+      });
+    });
+  }
+
+  // 一時権限の削除（剥奪を記録）
+  deletePermissionGrant(channelId, userId, permissionType) {
+    return new Promise((resolve, reject) => {
+      const query = `
+        DELETE FROM channel_permissions
+        WHERE channel_id = ? AND user_id = ? AND permission_type = ?
+      `;
+
+      this.db.run(query, [channelId, userId, permissionType], function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes > 0);
+        }
+      });
+    });
+  }
+
   // ノックリクエストを作成
   createKnockRequest(requesterId, requesterUsername, channelId, guildId, timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -123,7 +179,7 @@ class DatabaseManager {
         WHERE id = ? AND status = 'pending'
       `;
 
-      this.db.run(query, [approverId, new Date().toISOString(), requestId], function(err) {
+      this.db.run(query, [approverId, requestId], function(err) {
         if (err) {
           reject(err);
         } else {

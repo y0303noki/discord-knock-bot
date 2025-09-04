@@ -1,5 +1,6 @@
 const { Events } = require('discord.js');
 const db = require('../database/init');
+const { bot } = require('../config/config');
 
 module.exports = {
   name: Events.ClientReady,
@@ -14,6 +15,7 @@ module.exports = {
         if (cleanedCount > 0) {
           console.log(`🧹 Cleaned up ${cleanedCount} expired knock requests`);
         }
+        // 期限超過した一時権限のログクリーニング（将来の拡張用）
       } catch (error) {
         console.error('Database cleanup error:', error);
       }

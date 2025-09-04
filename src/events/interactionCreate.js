@@ -57,6 +57,10 @@ async function handleSlashCommand(interaction) {
       await handleBatchSetVoiceModeCommand(interaction);
       break;
 
+    case 'debug_perms':
+      await handleDebugPermsCommand(interaction);
+      break;
+
     default:
       await interaction.reply({
         content: '不明なコマンドです。',
@@ -86,16 +90,32 @@ async function handleKnockCommand(interaction) {
     });
   }
 
-  // 既存のリクエストがあるかチェック
-  const existingRequest = await db.getKnockRequest(channel.id, interaction.user.id);
-  if (existingRequest) {
-    return await interaction.reply({
-      content: '既にこのチャンネルへの入室リクエストがあります。',
-      ephemeral: true
-    });
+  // チャンネルが空なら、承認なしで一時権限を付与して即時入室可能にする
+  try {
+    const fetchedChannel = await interaction.client.channels.fetch(channel.id);
+    if (fetchedChannel && fetchedChannel.type === 2 && fetchedChannel.members.size === 0) {
+      await permissionManager.grantVoicePermission(channel.id, interaction.user.id, bot.defaultKnockTimeout);
+      try {
+        await db.createPermissionGrant(channel.id, interaction.user.id, 'voice_connect', bot.defaultKnockTimeout);
+      } catch (e) {
+        console.error('Failed to record permission grant (empty channel fast-track):', e);
+      }
+      return await interaction.reply({
+        content: `👋 現在このチャンネルは空です。承認なしで入室できるようにしました。`,
+        ephemeral: true
+      });
+    }
+  } catch (e) {
+    console.error('Empty-channel fast-track check failed:', e);
   }
 
+  // 既存のリクエストがあっても開発用途で続行できるように許可
+  // 本番でブロックしたい場合はこの条件分岐で早期returnする
+  const existingRequest = await db.getKnockRequest(channel.id, interaction.user.id);
+
   try {
+    // 応答タイムアウト回避
+    await interaction.deferReply({ ephemeral: true });
     // データベースにリクエストを作成
     const requestId = await db.createKnockRequest(
       interaction.user.id,
@@ -129,20 +149,23 @@ async function handleKnockCommand(interaction) {
           .setStyle(ButtonStyle.Danger)
       );
 
-    // チャンネルに通知
-    await channel.send({ embeds: [embed], components: [buttons] });
+    // 実行したテキストチャンネルに通知（ボイスチャンネルは投稿不可のため）
+    const targetTextChannel = interaction.channel;
+    await targetTextChannel.send({ embeds: [embed], components: [buttons] });
 
-    await interaction.reply({
-      content: `✅ **${channel.name}** への入室リクエストを送信しました。`,
-      ephemeral: true
+    await interaction.editReply({
+      content: `✅ **${channel.name}** への入室リクエストを送信しました。`
     });
 
   } catch (error) {
     console.error('Knock command error:', error);
-    await interaction.reply({
-      content: 'リクエストの送信中にエラーが発生しました。',
-      ephemeral: true
-    });
+    try {
+      await interaction.editReply({
+        content: 'リクエストの送信中にエラーが発生しました。'
+      });
+    } catch (_) {
+      // ignore
+    }
   }
 }
 
@@ -374,12 +397,59 @@ async function handleBatchSetVoiceModeCommand(interaction) {
   }
 }
 
+async function handleDebugPermsCommand(interaction) {
+  const target = interaction.options.getChannel('channel');
+
+  if (!target) {
+    return await interaction.reply({ content: 'チャンネルを指定してください。', ephemeral: true });
+  }
+
+  try {
+    const me = interaction.guild.members.me;
+    const perms = target.permissionsFor(me);
+
+    if (!perms) {
+      return await interaction.reply({ content: 'このチャンネルの権限を取得できません。', ephemeral: true });
+    }
+
+    const wanted = [
+      'ViewChannel',
+      'ManageChannels',
+      'Connect',
+      'Speak',
+      'ManageRoles',
+    ];
+
+    const lines = wanted.map(k => `- ${k}: ${perms.has(k) ? '✅' : '❌'}`);
+
+    await interaction.reply({
+      content: `権限（${target.name}）\n` + lines.join('\n'),
+      ephemeral: true,
+    });
+  } catch (e) {
+    console.error('debug_perms error:', e);
+    await interaction.reply({ content: '権限の取得中にエラーが発生しました。', ephemeral: true });
+  }
+}
+
 async function handleButtonInteraction(interaction) {
   const [action, requestId] = interaction.customId.split('_');
 
   try {
-    // チャンネルの承認設定を取得
-    const channelSettings = await permissionManager.getChannelApprovalSettings(interaction.channel.id);
+    // リクエスト情報を取得し、対象のボイスチャンネルIDを特定
+    const requestForChannel = await db.getKnockRequestById(requestId);
+
+    if (!requestForChannel) {
+      return await interaction.reply({
+        content: 'このリクエストは見つかりませんでした。',
+        ephemeral: true
+      });
+    }
+
+    const targetVoiceChannelId = requestForChannel.channel_id;
+
+    // 対象ボイスチャンネルの承認設定を取得
+    const channelSettings = await permissionManager.getChannelApprovalSettings(targetVoiceChannelId);
 
     if (!channelSettings) {
       return await interaction.reply({
@@ -390,7 +460,7 @@ async function handleButtonInteraction(interaction) {
 
     // 承認権限をチェック
     const hasPermission = await permissionManager.checkApprovalPermission(
-      interaction.channel.id,
+      targetVoiceChannelId,
       interaction.user.id,
       channelSettings.permissionType,
       channelSettings.allowedRoles
@@ -414,22 +484,28 @@ async function handleButtonInteraction(interaction) {
         });
       }
 
-      // 承認されたリクエストの情報を取得
-      const request = await db.getKnockRequestById(requestId);
-
-      if (!request) {
-        return await interaction.reply({
-          content: 'このリクエストは既に処理されているか、見つかりません。',
-          ephemeral: true
-        });
-      }
-
       // 権限を付与
-      await permissionManager.grantVoicePermission(
-        request.channel_id,
-        request.requester_id, // リクエスタに権限を付与
-        bot.defaultKnockTimeout
-      );
+      try {
+        await permissionManager.grantVoicePermission(
+          requestForChannel.channel_id,
+          requestForChannel.requester_id, // リクエスタに権限を付与
+          bot.defaultKnockTimeout
+        );
+        // 付与をDBに記録
+        try {
+          await db.createPermissionGrant(requestForChannel.channel_id, requestForChannel.requester_id, 'voice_connect', bot.defaultKnockTimeout);
+        } catch (e) {
+          console.error('Failed to record permission grant:', e);
+        }
+      } catch (err) {
+        if (err?.code === 50013) {
+          return await interaction.reply({
+            content: '権限付与に失敗しました（Botの権限不足）。チャンネルまたは親カテゴリでBotに「チャンネルの管理」を付与してください。',
+            ephemeral: true
+          });
+        }
+        throw err;
+      }
 
       // ボタンを無効化
       const disabledButtons = new ActionRowBuilder()

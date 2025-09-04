@@ -28,9 +28,9 @@ const rest = new REST({ version: '10' }).setToken(discord.token);
   try {
     console.log(`Started refreshing ${commands.length} application (/) commands.`);
 
-    // グローバルコマンドとして登録（全ギルドで使用可能）
+    // ギルドスコープで登録（即時反映）
     const data = await rest.put(
-      Routes.applicationCommands(discord.clientId),
+      Routes.applicationGuildCommands(discord.clientId, discord.guildId),
       { body: commands },
     );
 

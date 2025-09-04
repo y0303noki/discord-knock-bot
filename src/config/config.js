@@ -29,5 +29,6 @@ module.exports = {
   bot: {
     defaultKnockTimeout: parseInt(process.env.DEFAULT_KNOCK_TIMEOUT) || 300000, // 5分
     maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 5,
+    revokeAfterExitMs: parseInt(process.env.REVOKE_AFTER_EXIT_MS) || 1800000, // 30分（退室後）
   },
 };
