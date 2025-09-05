@@ -33,6 +33,9 @@ async function handleSlashCommand(interaction) {
     case 'knock':
       await handleKnockCommand(interaction);
       break;
+    case 'help':
+      await handleHelpCommand(interaction);
+      break;
 
     case 'preapprove': // 新しい 'preapprove' コマンドを追加
       // コマンド実行者が対象ボイスチャンネルに接続しているか確認
@@ -323,6 +326,26 @@ async function handleButtonInteraction(interaction) {
       ephemeral: true
     });
   }
+}
+
+async function handleHelpCommand(interaction) {
+  const helpEmbed = new EmbedBuilder()
+    .setColor(0x0099FF)
+    .setTitle('🚪 Knock Knock Botの使い方')
+    .setDescription('このBotは、プライベートなボイスチャンネルへの入室を管理します。')
+    .addFields(
+      { name: '`/knock`', value: '指定されたボイスチャンネルへの入室リクエストを送信します。チャンネルに誰もいない場合は、承認なしで入室できます。' },
+      { name: '`/preapprove`', value: '（VC接続者限定）指定したユーザーに、ノックなしで一時的に入室できる権限を付与します。' },
+      { name: '`/help`', value: 'このヘルプメッセージを表示します。' }
+    )
+    .setTimestamp()
+    .setFooter({ text: 'Knock Knock Bot' });
+
+  await interaction.reply({
+    content: 'このBotの使い方を表示します。',
+    embeds: [helpEmbed],
+    ephemeral: true
+  });
 }
 
 /**
