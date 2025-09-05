@@ -11,7 +11,7 @@ const commandsPath = path.join(__dirname, '../commands');
 const commandFiles = fs
   .readdirSync(commandsPath)
   .filter(file => file.endsWith('.js'))
-  .filter(file => ['knock.js', 'preapprove.js','help.js'].includes(file)); // 'knock' と 'preapprove' のみ読み込むようにフィルタリング
+  .filter(file => ['knock.js', 'preapprove.js', 'help.js'].includes(file)); // 登録するコマンドファイルを指定
 
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
