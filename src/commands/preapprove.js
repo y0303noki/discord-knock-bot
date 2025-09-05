@@ -16,6 +16,9 @@ module.exports = {
         .setDescription('権限の有効期限（時間単位、既定: 2時間）')
         .setRequired(false)),
   async execute(interaction) {
+    // 応答を保留し、処理時間を確保します。これにより3秒以上の処理が可能になります。
+    await interaction.deferReply({ ephemeral: true });
+
     const targetUser = interaction.options.getUser('target_user');
     const durationHours = interaction.options.getInteger('duration_hours') || 2; // デフォルト2時間
 
@@ -23,27 +26,26 @@ module.exports = {
 
     if (!voiceChannelId) {
       await interaction.reply({ content: '許可されたボイスチャンネルが設定されていません。Botのconfig.jsを確認してください。', ephemeral: true });
+      await interaction.editReply({ content: '許可されたボイスチャンネルが設定されていません。Botのconfig.jsを確認してください。' });
       return;
     }
     
     const voiceChannel = await interaction.client.channels.fetch(voiceChannelId);
     if (!voiceChannel || voiceChannel.type !== 2) {
       await interaction.reply({ content: '設定されたボイスチャンネルが見つからないか、ボイスチャンネルではありません。', ephemeral: true });
+      await interaction.editReply({ content: '設定されたボイスチャンネルが見つからないか、ボイスチャンネルではありません。' });
       return;
     }
 
-    const durationMs = durationHours * 60 * 60 * 1000; // ミリ秒に変換
-    const preApproveType = 'pre_approved';
+    const durationMs = durationHours * 60 * 60 * 1000;
 
     try {
       const permissionManager = new PermissionManager(interaction.client);
 
       // ユーザーにボイスチャンネル接続権限を付与 (Discord側のタイマーは preapprove の durationMs に基づく)
       await permissionManager.grantVoicePermission(voiceChannel.id, targetUser.id, durationMs);
-      
-      // データベースに事前承認情報を記録（入室時の判定と、退室後のrevokeAfterExitMs適用のため 'voice_connect' タイプを使用）
-      // 初期付与期間は durationMs とし、入室後は revokeAfterExitMs が適用されるようにする
-      await db.createPermissionGrant(voiceChannel.id, targetUser.id, 'voice_connect', durationMs);
+      // データベースに事前承認情報を記録。voiceStateUpdate.js がこの 'pre_approved' タイプを検知する。
+      await db.createPermissionGrant(voiceChannel.id, targetUser.id, 'pre_approved', durationMs);
 
       // ユーザーにDMを送信
       try {
@@ -53,21 +55,21 @@ module.exports = {
           `\nこの権限は **${durationHours} 時間** 有効です。` +
           `\n\n（※一度入室すると、通常のノック承認と同じく数分で権限が自動削除されます。再入室の際は再度承認が必要です。）`
         );
+        await interaction.editReply({
+          content: `✅ **${targetUser.tag}** に **${voiceChannel.name}** チャンネルへの事前入室権限を **${durationHours} 時間** 付与しました。`,
+        });
       } catch (dmError) {
         console.warn(`Failed to send DM to ${targetUser.tag}:`, dmError);
-        await interaction.followUp({ content: `${targetUser.tag} へのDM送信に失敗しましたが、権限は付与されました。`, ephemeral: true });
+        await interaction.editReply({
+          content: `✅ **${targetUser.tag}** に権限を付与しましたが、DMの送信に失敗しました。`,
+        });
       }
-
-      await interaction.reply({
-        content: `**${targetUser.tag}** に **${voiceChannel.name}** チャンネルへの事前入室権限を **${durationHours} 時間** 付与しました。`,
-        ephemeral: true,
-      });
 
     } catch (error) {
       console.error('Error pre-approving user:', error);
-      await interaction.reply({
-        content: `ユーザーの事前承認に失敗しました: ${error.message}`,
-        ephemeral: true,
+      // deferReply後なのでeditReplyを使う
+      await interaction.editReply({
+        content: `❌ ユーザーの事前承認に失敗しました: ${error.message}`,
       });
     }
   },
