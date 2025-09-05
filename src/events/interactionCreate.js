@@ -2,6 +2,7 @@ const { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = r
 const db = require('../database/init');
 const PermissionManager = require('../utils/permissions');
 const { bot } = require('../config/config');
+const preapproveCommand = require('../commands/preapprove'); // preapproveコマンドをインポート
 
 let permissionManager = null;
 
@@ -33,36 +34,27 @@ async function handleSlashCommand(interaction) {
       await handleKnockCommand(interaction);
       break;
 
-    case 'approve':
-      await handleApproveCommand(interaction);
-      break;
+    case 'preapprove': // 新しい 'preapprove' コマンドを追加
+      // コマンド実行者が対象ボイスチャンネルに接続しているか確認
+      const currentVoiceState = interaction.member.voice;
+      const voiceChannelId = bot.allowedVoiceChannelId;
 
-    case 'deny':
-      await handleDenyCommand(interaction);
-      break;
-
-    case 'set_private':
-      await handleSetPrivateCommand(interaction);
-      break;
-
-    case 'set_public':
-      await handleSetPublicCommand(interaction);
-      break;
-
-    case 'set_approval_mode':
-      await handleSetApprovalModeCommand(interaction);
-      break;
-
-    case 'batch_set_voice_mode':
-      await handleBatchSetVoiceModeCommand(interaction);
-      break;
-
-    case 'debug_perms':
-      await handleDebugPermsCommand(interaction);
-      break;
-
-    case 'help':
-      await handleHelpCommand(interaction);
+      if (!voiceChannelId) {
+        await interaction.reply({
+          content: '許可されたボイスチャンネルが設定されていません。Botのconfig.jsを確認してください。',
+          ephemeral: true
+        });
+        return;
+      }
+      
+      if (!currentVoiceState || currentVoiceState.channelId !== voiceChannelId) {
+        await interaction.reply({
+          content: `このコマンドは、固定のボイスチャンネル (<#${voiceChannelId}>) に接続している場合のみ使用できます。`,
+          ephemeral: true
+        });
+        return;
+      }
+      await preapproveCommand.execute(interaction);
       break;
 
     default:
@@ -117,6 +109,8 @@ async function handleKnockCommand(interaction) {
     if (fetchedChannel && fetchedChannel.type === 2 && fetchedChannel.members.size === 0) {
       await permissionManager.grantVoicePermission(channel.id, interaction.user.id, bot.defaultKnockTimeout);
       try {
+        // 空のチャンネルに直接入室した場合も 'voice_connect' として記録し、
+        // 退室後の revokeAfterExitMs を適用できるようにする
         await db.createPermissionGrant(channel.id, interaction.user.id, 'voice_connect', bot.defaultKnockTimeout);
       } catch (e) {
         console.error('Failed to record permission grant (empty channel fast-track):', e);
@@ -190,286 +184,6 @@ async function handleKnockCommand(interaction) {
   }
 }
 
-async function handleApproveCommand(interaction) {
-  const requestId = interaction.options.getInteger('request_id');
-
-  try {
-    const approved = await db.approveKnockRequest(requestId, interaction.user.id);
-
-    if (!approved) {
-      return await interaction.reply({
-        content: 'リクエストが見つからないか、既に処理されています。',
-        ephemeral: true
-      });
-    }
-
-    // 承認メッセージを送信
-    await interaction.reply({
-      content: `✅ リクエスト #${requestId} を承認しました。`,
-      ephemeral: true
-    });
-
-  } catch (error) {
-    console.error('Approve command error:', error);
-    await interaction.reply({
-      content: '承認処理中にエラーが発生しました。',
-      ephemeral: true
-    });
-  }
-}
-
-async function handleDenyCommand(interaction) {
-  const requestId = interaction.options.getInteger('request_id');
-
-  // 実際の実装ではデータベースからリクエストを削除または拒否状態に更新
-  await interaction.reply({
-    content: `❌ リクエスト #${requestId} を拒否しました。`,
-    ephemeral: true
-  });
-}
-
-async function handleSetPrivateCommand(interaction) {
-  const channel = interaction.options.getChannel('channel');
-
-  if (!channel || channel.type !== 2) {
-    return await interaction.reply({
-      content: 'ボイスチャンネルを指定してください。',
-      ephemeral: true
-    });
-  }
-
-  try {
-    await permissionManager.setChannelPrivate(channel.id);
-    await interaction.reply({
-      content: `🔒 **${channel.name}** をプライベートモードに設定しました。`,
-      ephemeral: true
-    });
-  } catch (error) {
-    console.error('Set private error:', error);
-    await interaction.reply({
-      content: 'チャンネルの設定中にエラーが発生しました。',
-      ephemeral: true
-    });
-  }
-}
-
-async function handleSetPublicCommand(interaction) {
-  const channel = interaction.options.getChannel('channel');
-
-  if (!channel || channel.type !== 2) {
-    return await interaction.reply({
-      content: 'ボイスチャンネルを指定してください。',
-      ephemeral: true
-    });
-  }
-
-  try {
-    await permissionManager.setChannelPublic(channel.id);
-    await interaction.reply({
-      content: `🔓 **${channel.name}** をパブリックモードに設定しました。`,
-      ephemeral: true
-    });
-  } catch (error) {
-    console.error('Set public error:', error);
-    await interaction.reply({
-      content: 'チャンネルの設定中にエラーが発生しました。',
-      ephemeral: true
-    });
-  }
-}
-
-async function handleSetApprovalModeCommand(interaction) {
-  const channel = interaction.options.getChannel('channel');
-  const mode = interaction.options.getString('mode');
-  const role = interaction.options.getRole('role');
-
-  if (!channel || channel.type !== 2) {
-    return await interaction.reply({
-      content: 'ボイスチャンネルを指定してください。',
-      ephemeral: true
-    });
-  }
-
-  // 管理者権限チェック
-  if (!interaction.member.permissions.has('ManageChannels')) {
-    return await interaction.reply({
-      content: 'チャンネルを管理する権限がありません。',
-      ephemeral: true
-    });
-  }
-
-  // ロール指定モードでロールが指定されていない場合
-  if (mode === 'role_based' && !role) {
-    return await interaction.reply({
-      content: 'ロール指定モードではロールを指定してください。',
-      ephemeral: true
-    });
-  }
-
-  try {
-    // 現在のトピックを取得
-    let currentTopic = channel.topic || '';
-
-    // 既存のノック設定を削除
-    currentTopic = currentTopic.replace(/\[knock:[^\]]+\]/g, '').trim();
-
-    // 新しい設定を追加
-    let newSetting = `[knock:${mode}`;
-    if (mode === 'role_based' && role) {
-      newSetting += `:${role.id}`;
-    }
-    newSetting += ']';
-
-    // トピックを更新
-    const updatedTopic = currentTopic ? `${currentTopic} ${newSetting}` : newSetting;
-
-    await channel.setTopic(updatedTopic);
-
-    const modeDescriptions = {
-      'channel_member': 'チャンネルメンバー全員',
-      'voice_connected': 'ボイス接続者のみ',
-      'role_based': `ロール「${role.name}」を持つ人のみ`
-    };
-
-    await interaction.reply({
-      content: `✅ **${channel.name}** の承認権限を **${modeDescriptions[mode]}** に設定しました。`,
-      ephemeral: true
-    });
-
-  } catch (error) {
-    console.error('Set approval mode error:', error);
-    await interaction.reply({
-      content: '承認モードの設定中にエラーが発生しました。',
-      ephemeral: true
-    });
-  }
-}
-
-async function handleBatchSetVoiceModeCommand(interaction) {
-  const confirm = interaction.options.getBoolean('confirm');
-
-  if (!confirm) {
-    return await interaction.reply({
-      content: '⚠️ 実行をキャンセルしました。確認のため `confirm: true` を指定してください。',
-      ephemeral: true
-    });
-  }
-
-  // 管理者権限チェック
-  if (!interaction.member.permissions.has('ManageChannels')) {
-    return await interaction.reply({
-      content: 'チャンネルを管理する権限がありません。',
-      ephemeral: true
-    });
-  }
-
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    const guild = interaction.guild;
-    const voiceChannels = guild.channels.cache.filter(channel =>
-      channel.type === 2 // GUILD_VOICE
-    );
-
-    let successCount = 0;
-    let failCount = 0;
-    const results = [];
-
-    for (const [channelId, channel] of voiceChannels) {
-      try {
-        // 現在のトピックを取得
-        let currentTopic = channel.topic || '';
-
-        // 既存のノック設定を削除
-        currentTopic = currentTopic.replace(/\[knock:[^\]]+\]/g, '').trim();
-
-        // 新しい設定を追加
-        const newSetting = '[knock:voice_connected]';
-        const updatedTopic = currentTopic ? `${currentTopic} ${newSetting}` : newSetting;
-
-        // トピックを更新
-        await channel.setTopic(updatedTopic);
-
-        successCount++;
-        results.push(`✅ ${channel.name}`);
-
-      } catch (error) {
-        console.error(`Failed to update channel ${channel.name}:`, error);
-        failCount++;
-        results.push(`❌ ${channel.name} (権限不足)`);
-      }
-    }
-
-    const summary = `📊 **一括設定完了**\n\n` +
-      `✅ 成功: ${successCount}チャンネル\n` +
-      `❌ 失敗: ${failCount}チャンネル\n\n` +
-      `**設定されたチャンネル:**\n${results.slice(0, 10).join('\n')}` +
-      (results.length > 10 ? `\n...他${results.length - 10}チャンネル` : '');
-
-    await interaction.editReply({
-      content: summary
-    });
-
-  } catch (error) {
-    console.error('Batch set voice mode error:', error);
-    await interaction.editReply({
-      content: '一括設定中にエラーが発生しました。'
-    });
-  }
-}
-
-async function handleDebugPermsCommand(interaction) {
-  const target = interaction.options.getChannel('channel');
-
-  if (!target) {
-    return await interaction.reply({ content: 'チャンネルを指定してください。', ephemeral: true });
-  }
-
-  try {
-    const me = interaction.guild.members.me;
-    const perms = target.permissionsFor(me);
-
-    if (!perms) {
-      return await interaction.reply({ content: 'このチャンネルの権限を取得できません。', ephemeral: true });
-    }
-
-    const wanted = [
-      'ViewChannel',
-      'ManageChannels',
-      'Connect',
-      'Speak',
-      'ManageRoles',
-    ];
-
-    const lines = wanted.map(k => `- ${k}: ${perms.has(k) ? '✅' : '❌'}`);
-
-    await interaction.reply({
-      content: `権限（${target.name}）\n` + lines.join('\n'),
-      ephemeral: true,
-    });
-  } catch (e) {
-    console.error('debug_perms error:', e);
-    await interaction.reply({ content: '権限の取得中にエラーが発生しました。', ephemeral: true });
-  }
-}
-
-async function handleHelpCommand(interaction) {
-  const lines = [
-    'このBotは、指定のボイスチャンネルに「ノック」して入室許可を得る仕組みです。',
-    '',
-    '使い方:',
-    '- /knock を実行（チャンネル選択は不要です）',
-    '- 表示されたメッセージの「✅ 承認」を入室しているメンバーのだれかが押すと、入室できます',
-    '- 退室後一定時間経過すると、入室権限が自動で外れます',
-    '',
-    '補足:',
-    '- ボイスチャンネルが空なら/knockを実行すると承認なしで入室できます',
-    '- 権限は時間で自動的に外れます（承認からの待機時間／退室後の猶予）',
-  ];
-
-  await interaction.reply({ content: lines.join('\n'), ephemeral: true });
-}
-
 async function handleButtonInteraction(interaction) {
   const [action, requestId] = interaction.customId.split('_');
 
@@ -531,6 +245,8 @@ async function handleButtonInteraction(interaction) {
         );
         // 付与をDBに記録
         try {
+          // ボタンからの承認も 'voice_connect' として記録し、
+          // 退室後の revokeAfterExitMs を適用できるようにする
           await db.createPermissionGrant(requestForChannel.channel_id, requestForChannel.requester_id, 'voice_connect', bot.defaultKnockTimeout);
         } catch (e) {
           console.error('Failed to record permission grant:', e);
