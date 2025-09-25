@@ -342,7 +342,6 @@ async function handleHelpCommand(interaction) {
     .setFooter({ text: 'Knock Knock Bot' });
 
   await interaction.reply({
-    content: 'このBotの使い方を表示します。',
     embeds: [helpEmbed],
     ephemeral: true
   });
