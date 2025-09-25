@@ -19,41 +19,37 @@ class DatabaseManager {
   }
 
   initTables() {
-    const queries = [
-      `CREATE TABLE IF NOT EXISTS knock_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        requester_id TEXT NOT NULL,
-        requester_username TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        guild_id TEXT NOT NULL,
-        status TEXT DEFAULT 'pending',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expires_at DATETIME,
-        approved_by TEXT,
-        approved_at DATETIME
-      )`,
+    this.db.serialize(() => {
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS knock_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          requester_id TEXT NOT NULL,
+          requester_username TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          guild_id TEXT NOT NULL,
+          status TEXT DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          expires_at DATETIME,
+          approved_by TEXT,
+          approved_at DATETIME
+        )
+      `, (err) => { if (err) console.error('Database initialization error:', err); });
 
-      `CREATE TABLE IF NOT EXISTS channel_permissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        permission_type TEXT NOT NULL,
-        granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expires_at DATETIME,
-        UNIQUE(channel_id, user_id, permission_type)
-      )`,
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS channel_permissions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          channel_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          permission_type TEXT NOT NULL,
+          granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          expires_at DATETIME,
+          UNIQUE(channel_id, user_id, permission_type)
+        )
+      `, (err) => { if (err) console.error('Database initialization error:', err); });
 
-      `CREATE INDEX IF NOT EXISTS idx_knock_requests_status ON knock_requests(status)`,
-      `CREATE INDEX IF NOT EXISTS idx_knock_requests_channel ON knock_requests(channel_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_channel_permissions_expires ON channel_permissions(expires_at)`
-    ];
-
-    queries.forEach(query => {
-      this.db.run(query, (err) => {
-        if (err) {
-          console.error('Database initialization error:', err);
-        }
-      });
+      this.db.run('CREATE INDEX IF NOT EXISTS idx_knock_requests_status ON knock_requests(status)', (err) => { if (err) console.error('Database initialization error:', err); });
+      this.db.run('CREATE INDEX IF NOT EXISTS idx_knock_requests_channel ON knock_requests(channel_id)', (err) => { if (err) console.error('Database initialization error:', err); });
+      this.db.run('CREATE INDEX IF NOT EXISTS idx_channel_permissions_expires ON channel_permissions(expires_at)', (err) => { if (err) console.error('Database initialization error:', err); });
     });
   }
 
